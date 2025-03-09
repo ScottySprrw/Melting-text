@@ -19,7 +19,7 @@
 
         .text-container {
             position: relative;
-            cursor: pointer;
+            z-index: 2;
         }
 
         .letter {
@@ -28,9 +28,22 @@
             color: #00ffff;
             text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
             font-family: 'Orbitron', sans-serif;
-            transition: all 0.5s ease;
+            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
             transform-origin: top;
+        }
+
+        .letter-container {
+            display: inline-block;
+            position: relative;
+        }
+
+        .drip-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none;
         }
 
         .drip {
@@ -39,8 +52,9 @@
             box-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
             pointer-events: none;
             border-radius: 50%;
-            animation: dripping 2s forwards cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: -1;
+            animation: dripping 2.5s forwards cubic-bezier(0.4, 0, 0.2, 1);
+            transform-origin: top center;
+            z-index: 1;
         }
 
         .letter::before {
@@ -52,14 +66,15 @@
             height: 0;
             background: linear-gradient(180deg, #00ffff, #0066cc);
             transform: translateX(-50%);
-            transition: all 0.3s ease;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
             border-radius: 50%;
             opacity: 0;
+            z-index: -1;
         }
 
         .letter.melting::before {
             width: 100%;
-            height: 100%;
+            height: 120%;
             opacity: 1;
         }
 
@@ -68,59 +83,73 @@
                 height: 0;
                 width: 8px;
                 opacity: 0.9;
+                transform: scaleY(0) translateY(0);
                 border-radius: 50% 50% 45% 45%;
             }
-            40% {
+            10% {
+                height: 10px;
                 width: 12px;
+                transform: scaleY(1) translateY(0);
                 border-radius: 45% 45% 40% 40%;
+            }
+            90% {
+                opacity: 0.7;
             }
             100% {
                 height: 100vh;
-                width: 6px;
+                width: 4px;
                 opacity: 0;
+                transform: scaleY(1) translateY(0);
                 border-radius: 40% 40% 35% 35%;
             }
         }
 
         .letter.melting {
-            transform: scaleY(1.2) translateY(10px);
+            transform: scaleY(1.5) translateY(15px);
             opacity: 0;
-            filter: blur(2px);
+            filter: blur(3px);
         }
 
         .bottom-pool {
             position: fixed;
             bottom: 0;
-            left: 0;
-            width: 100%;
+            left: 50%;
+            transform: translateX(-50%);
             height: 0;
             background: linear-gradient(180deg, #00ffff, #0066cc);
-            transition: height 1.5s ease;
+            transition: all 2s cubic-bezier(0.4, 0, 0.2, 1);
             box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+            border-radius: 50% 50% 0 0;
+            z-index: 3;
+            cursor: pointer;
         }
 
-        .puddle {
-            position: fixed;
-            bottom: 0;
-            height: 0;
-            background: linear-gradient(180deg, #00ffff, #0066cc);
-            box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
-            border-radius: 50% 50% 0 0;
-            animation: pooling 1.5s forwards;
-            transform-origin: bottom center;
-            z-index: 1;
+        .bottom-pool::after {
+            content: 'Click to Reset';
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #00ffff;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1rem;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .bottom-pool.show-reset::after {
+            opacity: 1;
         }
 
         @keyframes pooling {
             0% {
-                width: 0;
-                height: 0;
-                opacity: 0;
+                transform: translateX(-50%) scaleX(1);
+            }
+            50% {
+                transform: translateX(-50%) scaleX(1.1);
             }
             100% {
-                width: 60px;
-                height: 15px;
-                opacity: 0.7;
+                transform: translateX(-50%) scaleX(1);
             }
         }
     </style>
@@ -133,6 +162,7 @@
         const text = document.getElementById('text');
         const pool = document.getElementById('pool');
         const originalContent = text.textContent;
+        let poolWidth = 0;
         let poolHeight = 0;
         let allLettersMelted = false;
         let meltedLettersCount = 0;
@@ -141,10 +171,19 @@
         function initializeText() {
             text.textContent = '';
             [...originalContent].forEach(char => {
+                const container = document.createElement('span');
+                container.className = 'letter-container';
+                
                 const span = document.createElement('span');
                 span.textContent = char;
                 span.className = 'letter';
-                text.appendChild(span);
+                
+                const dripContainer = document.createElement('div');
+                dripContainer.className = 'drip-container';
+                
+                container.appendChild(span);
+                container.appendChild(dripContainer);
+                text.appendChild(container);
             });
         }
 
@@ -158,74 +197,66 @@
                 const drips = document.querySelectorAll('.drip');
                 drips.forEach(drip => drip.remove());
                 
-                const puddles = document.querySelectorAll('.puddle');
-                puddles.forEach(puddle => puddle.remove());
-                
+                pool.style.width = '0';
                 pool.style.height = '0';
+                pool.classList.remove('show-reset');
+                poolWidth = 0;
                 poolHeight = 0;
                 meltedLettersCount = 0;
                 allLettersMelted = false;
             }
         }
 
-        function createDrip(letter, offset) {
+        function createDrip(letter, dripContainer, offset) {
             const drip = document.createElement('div');
             drip.className = 'drip';
-            const offsetX = (Math.random() - 0.5) * 15;
-            const startY = letter.offsetTop + letter.offsetHeight;
-            drip.style.left = `${letter.offsetLeft + letter.offsetWidth / 2 + offsetX}px`;
-            drip.style.top = `${startY}px`;
-            document.body.appendChild(drip);
+            const offsetX = (Math.random() - 0.5) * 10;
+            drip.style.left = `${letter.offsetWidth / 2 + offsetX}px`;
+            drip.style.top = `${letter.offsetHeight}px`;
+            dripContainer.appendChild(drip);
 
             setTimeout(() => {
                 drip.remove();
-            }, 2000);
+            }, 2500);
         }
 
-        function createPuddle(letter) {
-            const puddle = document.createElement('div');
-            puddle.className = 'puddle';
-            puddle.style.left = `${letter.offsetLeft + letter.offsetWidth / 2 - 30}px`;
-            document.body.appendChild(puddle);
-
-            setTimeout(() => {
-                puddle.style.opacity = '0';
-                setTimeout(() => puddle.remove(), 1500);
-            }, 1500);
+        function updatePool() {
+            poolWidth = Math.min(poolWidth + 20, window.innerWidth * 0.8);
+            poolHeight = Math.min(poolHeight + 3, window.innerHeight * 0.15);
+            pool.style.width = `${poolWidth}px`;
+            pool.style.height = `${poolHeight}px`;
+            pool.style.animation = 'pooling 1s ease';
         }
 
         initializeText();
 
-        document.querySelectorAll('.letter').forEach(letter => {
+        document.querySelectorAll('.letter').forEach((letter, index) => {
             if (letter.textContent !== ' ') {
                 letter.addEventListener('mouseover', () => {
                     if (!letter.classList.contains('melting')) {
                         letter.classList.add('melting');
                         meltedLettersCount++;
                         
-                        const dripsCount = 4;
+                        const dripContainer = letter.parentElement.querySelector('.drip-container');
+                        const dripsCount = 5;
                         for (let i = 0; i < dripsCount; i++) {
                             setTimeout(() => {
-                                createDrip(letter, i);
-                            }, i * 100);
+                                createDrip(letter, dripContainer, i);
+                            }, i * 150);
                         }
 
-                        setTimeout(() => {
-                            createPuddle(letter);
-                        }, 800);
-
-                        poolHeight += 4;
-                        pool.style.height = `${poolHeight}px`;
+                        updatePool();
 
                         if (meltedLettersCount === totalLetters) {
                             allLettersMelted = true;
+                            pool.classList.add('show-reset');
                         }
                     }
                 });
             }
         });
 
-        text.addEventListener('click', reset);
+        pool.addEventListener('click', reset);
     </script>
 </body>
 </html> 
