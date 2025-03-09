@@ -14,6 +14,8 @@
     <script src="https://threejs.org/examples/js/shaders/CopyShader.js"></script>
     <script src="https://threejs.org/examples/js/shaders/LuminosityHighPassShader.js"></script>
     <script src="https://threejs.org/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://threejs.org/examples/js/loaders/FontLoader.js"></script>
+    <script src="https://threejs.org/examples/js/geometries/TextGeometry.js"></script>
 
     <style>
         body {
@@ -79,12 +81,13 @@
     </script>
 
     <script>
-        let scene, camera, renderer, composer, controls;
+        let scene, camera, renderer, composer, controls, raycaster, mouse;
         let textMesh, liquidSystem, metaballSystem;
         let time = 0;
         const particles = [];
         const gridSize = 32;
         const resolution = 50;
+        const TEXT = "scotts app";
 
         class LiquidParticle {
             constructor(position) {
@@ -285,6 +288,11 @@
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            // Initialize raycaster and mouse
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true,
                 alpha: true,
@@ -297,16 +305,16 @@
             renderer.toneMappingExposure = 1;
             document.body.appendChild(renderer.domElement);
 
-            // Post-processing
+            // Post-processing setup
             composer = new THREE.EffectComposer(renderer);
             const renderPass = new THREE.RenderPass(scene, camera);
             composer.addPass(renderPass);
 
             const bloomPass = new THREE.UnrealBloomPass(
                 new THREE.Vector2(window.innerWidth, window.innerHeight),
-                1.5, // strength
-                0.4, // radius
-                0.85 // threshold
+                1.5,
+                0.4,
+                0.85
             );
             composer.addPass(bloomPass);
 
@@ -342,6 +350,8 @@
                     bevelSegments: 5
                 });
 
+                textGeometry.computeBoundingBox();
+                textGeometry.computeVertexNormals();
                 textGeometry.center();
 
                 const textMaterial = new THREE.MeshPhongMaterial({
@@ -391,18 +401,27 @@
                 }
 
                 // Heat and deform nearby vertices
-                const vertices = textMesh.geometry.vertices;
+                const position = textMesh.geometry.attributes.position;
                 const heatRadius = 0.2;
-                vertices.forEach(vertex => {
+                
+                for (let i = 0; i < position.count; i++) {
+                    const vertex = new THREE.Vector3();
+                    vertex.fromBufferAttribute(position, i);
+                    vertex.applyMatrix4(textMesh.matrixWorld);
+                    
                     const dist = vertex.distanceTo(point);
                     if (dist < heatRadius) {
                         const heat = 1 - (dist / heatRadius);
                         vertex.y -= 0.01 * heat;
                         vertex.x += (Math.random() - 0.5) * 0.005 * heat;
                         vertex.z += (Math.random() - 0.5) * 0.005 * heat;
-                        textMesh.geometry.verticesNeedUpdate = true;
+                        
+                        // Update the position in the buffer
+                        vertex.applyMatrix4(textMesh.matrixWorld.invert());
+                        position.setXYZ(i, vertex.x, vertex.y, vertex.z);
                     }
-                });
+                }
+                position.needsUpdate = true;
             }
         }
 
