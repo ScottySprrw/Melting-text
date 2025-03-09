@@ -28,9 +28,9 @@
             color: #00ffff;
             text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
             font-family: 'Orbitron', sans-serif;
-            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: transform 1.2s cubic-bezier(0.2, 1, 0.3, 1);
             position: relative;
-            transform-origin: top;
+            transform-origin: center;
         }
 
         .letter-container {
@@ -46,127 +46,92 @@
             pointer-events: none;
         }
 
+        .melting-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, #00ffff, #0066cc);
+            opacity: 0;
+            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 30% 30% 40% 40%;
+            transform: scaleY(0.8);
+            transform-origin: top;
+        }
+
+        .letter.melting .melting-overlay {
+            opacity: 1;
+            transform: scaleY(1.2);
+            border-radius: 40% 40% 60% 60%;
+        }
+
         .drip {
             position: absolute;
             background: linear-gradient(180deg, #00ffff, #0066cc);
             box-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
             pointer-events: none;
-            border-radius: 50%;
-            animation: dripping 2.5s forwards cubic-bezier(0.4, 0, 0.2, 1);
-            transform-origin: top center;
-            z-index: 1;
-        }
-
-        .letter::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 50%;
-            width: 0;
-            height: 0;
-            background: linear-gradient(180deg, #00ffff, #0066cc);
-            transform: translateX(-50%);
-            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-            border-radius: 50%;
+            width: 6px;
             opacity: 0;
-            z-index: -1;
-        }
-
-        .letter.melting::before {
-            width: 100%;
-            height: 120%;
-            opacity: 1;
+            border-radius: 40% 40% 45% 45%;
+            animation: dripping 2s forwards cubic-bezier(0.4, 0, 0.2, 1);
+            transform-origin: top center;
         }
 
         @keyframes dripping {
             0% {
                 height: 0;
-                width: 8px;
-                opacity: 0.9;
-                transform: scaleY(0) translateY(0);
-                border-radius: 50% 50% 45% 45%;
+                opacity: 0;
+                transform: scaleX(1) translateY(0);
             }
-            10% {
+            5% {
+                opacity: 1;
                 height: 10px;
-                width: 12px;
-                transform: scaleY(1) translateY(0);
-                border-radius: 45% 45% 40% 40%;
+                transform: scaleX(1.5) translateY(0);
             }
-            90% {
-                opacity: 0.7;
+            15% {
+                height: 20px;
+                transform: scaleX(1) translateY(10px);
             }
             100% {
-                height: 100vh;
-                width: 4px;
-                opacity: 0;
-                transform: scaleY(1) translateY(0);
-                border-radius: 40% 40% 35% 35%;
+                height: var(--fall-height);
+                opacity: 1;
+                transform: scaleX(0.8) translateY(var(--fall-height));
             }
         }
 
         .letter.melting {
-            transform: scaleY(1.5) translateY(15px);
+            transform: scale(1.1, 1.3) translateY(10px);
             opacity: 0;
-            filter: blur(3px);
+            transition: all 1.2s cubic-bezier(0.2, 1, 0.3, 1);
         }
 
-        .bottom-pool {
-            position: fixed;
+        .puddle {
+            position: absolute;
             bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            height: 0;
             background: linear-gradient(180deg, #00ffff, #0066cc);
-            transition: all 2s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
-            border-radius: 50% 50% 0 0;
-            z-index: 3;
+            border-radius: 50%;
+            transform: translateX(-50%);
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
             cursor: pointer;
         }
 
-        .bottom-pool::after {
-            content: 'Click to Reset';
-            position: absolute;
-            top: -30px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #00ffff;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 1rem;
-            opacity: 0;
-            transition: opacity 0.5s ease;
-        }
-
-        .bottom-pool.show-reset::after {
-            opacity: 1;
-        }
-
-        @keyframes pooling {
-            0% {
-                transform: translateX(-50%) scaleX(1);
-            }
-            50% {
-                transform: translateX(-50%) scaleX(1.1);
-            }
-            100% {
-                transform: translateX(-50%) scaleX(1);
-            }
+        .puddle.merging {
+            transition: all 1s cubic-bezier(0.4, 0, 0.2, 1);
         }
     </style>
 </head>
 <body>
     <div class="text-container" id="text">scotts app</div>
-    <div class="bottom-pool" id="pool"></div>
 
     <script>
         const text = document.getElementById('text');
-        const pool = document.getElementById('pool');
         const originalContent = text.textContent;
-        let poolWidth = 0;
-        let poolHeight = 0;
         let allLettersMelted = false;
         let meltedLettersCount = 0;
         const totalLetters = originalContent.replace(/\s/g, '').length;
+        let puddles = [];
 
         function initializeText() {
             text.textContent = '';
@@ -178,6 +143,10 @@
                 span.textContent = char;
                 span.className = 'letter';
                 
+                const overlay = document.createElement('div');
+                overlay.className = 'melting-overlay';
+                span.appendChild(overlay);
+                
                 const dripContainer = document.createElement('div');
                 dripContainer.className = 'drip-container';
                 
@@ -185,6 +154,73 @@
                 container.appendChild(dripContainer);
                 text.appendChild(container);
             });
+        }
+
+        function createDrip(letter, dripContainer) {
+            const drip = document.createElement('div');
+            drip.className = 'drip';
+            const letterRect = letter.getBoundingClientRect();
+            const fallHeight = window.innerHeight - letterRect.bottom;
+            drip.style.setProperty('--fall-height', `${fallHeight}px`);
+            
+            const offsetX = (Math.random() - 0.5) * 5;
+            drip.style.left = `${letter.offsetWidth / 2 + offsetX}px`;
+            drip.style.top = `${letter.offsetHeight}px`;
+            dripContainer.appendChild(drip);
+
+            // Create puddle when drip hits bottom
+            setTimeout(() => {
+                createPuddle(letterRect.left + letter.offsetWidth / 2 + offsetX);
+                drip.remove();
+            }, 1900);
+        }
+
+        function createPuddle(x) {
+            const puddle = document.createElement('div');
+            puddle.className = 'puddle';
+            puddle.style.left = `${x}px`;
+            let size = 20 + Math.random() * 10;
+            puddle.style.width = `${size}px`;
+            puddle.style.height = `${size/2}px`;
+            document.body.appendChild(puddle);
+            puddles.push({
+                element: puddle,
+                x: x,
+                size: size
+            });
+            
+            mergePuddles();
+        }
+
+        function mergePuddles() {
+            for (let i = 0; i < puddles.length; i++) {
+                for (let j = i + 1; j < puddles.length; j++) {
+                    const p1 = puddles[i];
+                    const p2 = puddles[j];
+                    const distance = Math.abs(p1.x - p2.x);
+                    
+                    if (distance < (p1.size + p2.size) / 2) {
+                        // Merge puddles
+                        const newX = (p1.x + p2.x) / 2;
+                        const newSize = Math.sqrt(p1.size * p1.size + p2.size * p2.size);
+                        
+                        p1.element.classList.add('merging');
+                        p2.element.classList.add('merging');
+                        
+                        p1.element.style.left = `${newX}px`;
+                        p1.element.style.width = `${newSize}px`;
+                        p1.element.style.height = `${newSize/2}px`;
+                        
+                        p1.x = newX;
+                        p1.size = newSize;
+                        
+                        setTimeout(() => {
+                            p2.element.remove();
+                            puddles.splice(j, 1);
+                        }, 500);
+                    }
+                }
+            }
         }
 
         function reset() {
@@ -197,40 +233,17 @@
                 const drips = document.querySelectorAll('.drip');
                 drips.forEach(drip => drip.remove());
                 
-                pool.style.width = '0';
-                pool.style.height = '0';
-                pool.classList.remove('show-reset');
-                poolWidth = 0;
-                poolHeight = 0;
+                puddles.forEach(puddle => puddle.element.remove());
+                puddles = [];
+                
                 meltedLettersCount = 0;
                 allLettersMelted = false;
             }
         }
 
-        function createDrip(letter, dripContainer, offset) {
-            const drip = document.createElement('div');
-            drip.className = 'drip';
-            const offsetX = (Math.random() - 0.5) * 10;
-            drip.style.left = `${letter.offsetWidth / 2 + offsetX}px`;
-            drip.style.top = `${letter.offsetHeight}px`;
-            dripContainer.appendChild(drip);
-
-            setTimeout(() => {
-                drip.remove();
-            }, 2500);
-        }
-
-        function updatePool() {
-            poolWidth = Math.min(poolWidth + 20, window.innerWidth * 0.8);
-            poolHeight = Math.min(poolHeight + 3, window.innerHeight * 0.15);
-            pool.style.width = `${poolWidth}px`;
-            pool.style.height = `${poolHeight}px`;
-            pool.style.animation = 'pooling 1s ease';
-        }
-
         initializeText();
 
-        document.querySelectorAll('.letter').forEach((letter, index) => {
+        document.querySelectorAll('.letter').forEach((letter) => {
             if (letter.textContent !== ' ') {
                 letter.addEventListener('mouseover', () => {
                     if (!letter.classList.contains('melting')) {
@@ -238,25 +251,26 @@
                         meltedLettersCount++;
                         
                         const dripContainer = letter.parentElement.querySelector('.drip-container');
-                        const dripsCount = 5;
+                        const dripsCount = 3;
                         for (let i = 0; i < dripsCount; i++) {
                             setTimeout(() => {
-                                createDrip(letter, dripContainer, i);
-                            }, i * 150);
+                                createDrip(letter, dripContainer);
+                            }, i * 200);
                         }
-
-                        updatePool();
 
                         if (meltedLettersCount === totalLetters) {
                             allLettersMelted = true;
-                            pool.classList.add('show-reset');
                         }
                     }
                 });
             }
         });
 
-        pool.addEventListener('click', reset);
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('puddle')) {
+                reset();
+            }
+        });
     </script>
 </body>
 </html> 
