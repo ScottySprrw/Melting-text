@@ -17,22 +17,93 @@
 </head>
 <body>
     <script>
-        let scene, camera, renderer, textMesh;
+        let scene, camera, renderer, textMesh, raycaster, mouse;
         const TEXT = "scotts app";
+        let drips = [];
+
+        class Drip {
+            constructor(startPosition, color) {
+                const geometry = new THREE.SphereGeometry(0.02, 8, 8);
+                const material = new THREE.MeshPhongMaterial({
+                    color: color,
+                    emissive: 0x006666,
+                    shininess: 100,
+                    transparent: true,
+                    opacity: 0.9
+                });
+                
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.position.copy(startPosition);
+                this.velocity = new THREE.Vector3(0, 0, 0);
+                this.acceleration = new THREE.Vector3(0, -0.01, 0); // Gravity
+                this.trail = [];
+                this.createTrail();
+                
+                scene.add(this.mesh);
+            }
+
+            createTrail() {
+                const trailGeometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(30 * 3); // 10 points, 3 coordinates each
+                trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                
+                const trailMaterial = new THREE.LineBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                
+                this.trailLine = new THREE.Line(trailGeometry, trailMaterial);
+                scene.add(this.trailLine);
+            }
+
+            update() {
+                // Update velocity and position with acceleration
+                this.velocity.add(this.acceleration);
+                this.mesh.position.add(this.velocity);
+
+                // Update trail
+                this.trail.unshift(this.mesh.position.clone());
+                if (this.trail.length > 10) {
+                    this.trail.pop();
+                }
+
+                const positions = this.trailLine.geometry.attributes.position.array;
+                for (let i = 0; i < this.trail.length; i++) {
+                    const point = this.trail[i];
+                    positions[i * 3] = point.x;
+                    positions[i * 3 + 1] = point.y;
+                    positions[i * 3 + 2] = point.z;
+                }
+                this.trailLine.geometry.attributes.position.needsUpdate = true;
+
+                // Add random wobble
+                this.mesh.position.x += (Math.random() - 0.5) * 0.002;
+                this.mesh.position.z += (Math.random() - 0.5) * 0.002;
+
+                return this.mesh.position.y > -3; // Return false when drip should be removed
+            }
+
+            remove() {
+                scene.remove(this.mesh);
+                scene.remove(this.trailLine);
+            }
+        }
 
         function init() {
-            // Create scene
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0a0a2a);
 
-            // Create camera
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.z = 5;
 
-            // Create renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
+
+            // Initialize raycaster and mouse
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
 
             // Add lights
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -68,11 +139,16 @@
 
                 textMesh = new THREE.Mesh(textGeometry, textMaterial);
                 scene.add(textMesh);
-                console.log("Text mesh added to scene");
             });
 
-            // Add window resize handler
+            // Add event listeners
             window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('mousemove', onMouseMove, false);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
         }
 
         function onWindowResize() {
@@ -81,11 +157,56 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        function melt() {
+            if (!textMesh) return;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(textMesh);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                
+                // Create drips at intersection point
+                if (Math.random() < 0.3) { // Control drip creation rate
+                    drips.push(new Drip(point, 0x00ffff));
+                }
+
+                // Deform the text mesh
+                const position = textMesh.geometry.attributes.position;
+                const heatRadius = 0.1;
+                
+                for (let i = 0; i < position.count; i++) {
+                    const vertex = new THREE.Vector3();
+                    vertex.fromBufferAttribute(position, i);
+                    vertex.applyMatrix4(textMesh.matrixWorld);
+                    
+                    const dist = vertex.distanceTo(point);
+                    if (dist < heatRadius) {
+                        const heat = 1 - (dist / heatRadius);
+                        vertex.y -= 0.005 * heat;
+                        
+                        // Update vertex position
+                        vertex.applyMatrix4(textMesh.matrixWorld.invert());
+                        position.setXYZ(i, vertex.x, vertex.y, vertex.z);
+                    }
+                }
+                position.needsUpdate = true;
+            }
+        }
+
         function animate() {
             requestAnimationFrame(animate);
-            if (textMesh) {
-                textMesh.rotation.y += 0.005;
-            }
+            
+            // Update and remove drips
+            drips = drips.filter(drip => {
+                const shouldKeep = drip.update();
+                if (!shouldKeep) {
+                    drip.remove();
+                }
+                return shouldKeep;
+            });
+
+            melt();
             renderer.render(scene, camera);
         }
 
