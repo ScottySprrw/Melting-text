@@ -5,272 +5,198 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scott's App</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body {
             margin: 0;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #0a0a2a;
             overflow: hidden;
-            flex-direction: column;
+            background-color: #0a0a2a;
         }
-
-        .text-container {
-            position: relative;
-            z-index: 2;
-        }
-
-        .letter {
-            display: inline-block;
-            font-size: 4rem;
-            color: #00ffff;
-            text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
-            font-family: 'Orbitron', sans-serif;
-            transition: transform 1.2s cubic-bezier(0.2, 1, 0.3, 1);
-            position: relative;
-            transform-origin: center;
-        }
-
-        .letter-container {
-            display: inline-block;
-            position: relative;
-        }
-
-        .drip-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            pointer-events: none;
-        }
-
-        .melting-overlay {
-            position: absolute;
+        canvas {
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(180deg, #00ffff, #0066cc);
-            opacity: 0;
-            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-            border-radius: 30% 30% 40% 40%;
-            transform: scaleY(0.8);
-            transform-origin: top;
         }
-
-        .letter.melting .melting-overlay {
-            opacity: 1;
-            transform: scaleY(1.2);
-            border-radius: 40% 40% 60% 60%;
-        }
-
-        .drip {
-            position: absolute;
-            background: linear-gradient(180deg, #00ffff, #0066cc);
-            box-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
+        #text-overlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: 'Orbitron', sans-serif;
+            font-size: 4rem;
+            color: #00ffff;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
             pointer-events: none;
-            width: 6px;
             opacity: 0;
-            border-radius: 40% 40% 45% 45%;
-            animation: dripping 2s forwards cubic-bezier(0.4, 0, 0.2, 1);
-            transform-origin: top center;
-        }
-
-        @keyframes dripping {
-            0% {
-                height: 0;
-                opacity: 0;
-                transform: scaleX(1) translateY(0);
-            }
-            5% {
-                opacity: 1;
-                height: 10px;
-                transform: scaleX(1.5) translateY(0);
-            }
-            15% {
-                height: 20px;
-                transform: scaleX(1) translateY(10px);
-            }
-            100% {
-                height: var(--fall-height);
-                opacity: 1;
-                transform: scaleX(0.8) translateY(var(--fall-height));
-            }
-        }
-
-        .letter.melting {
-            transform: scale(1.1, 1.3) translateY(10px);
-            opacity: 0;
-            transition: all 1.2s cubic-bezier(0.2, 1, 0.3, 1);
-        }
-
-        .puddle {
-            position: absolute;
-            bottom: 0;
-            background: linear-gradient(180deg, #00ffff, #0066cc);
-            border-radius: 50%;
-            transform: translateX(-50%);
-            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
-            cursor: pointer;
-        }
-
-        .puddle.merging {
-            transition: all 1s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: opacity 0.5s ease;
         }
     </style>
 </head>
 <body>
-    <div class="text-container" id="text">scotts app</div>
-
+    <div id="text-overlay">scotts app</div>
     <script>
-        const text = document.getElementById('text');
-        const originalContent = text.textContent;
-        let allLettersMelted = false;
-        let meltedLettersCount = 0;
-        const totalLetters = originalContent.replace(/\s/g, '').length;
-        let puddles = [];
+        let scene, camera, renderer, raycaster, mouse;
+        let textMesh, liquidParticles = [], poolMesh;
+        let isInitialized = false;
+        const TEXT = "scotts app";
 
-        function initializeText() {
-            text.textContent = '';
-            [...originalContent].forEach(char => {
-                const container = document.createElement('span');
-                container.className = 'letter-container';
-                
-                const span = document.createElement('span');
-                span.textContent = char;
-                span.className = 'letter';
-                
-                const overlay = document.createElement('div');
-                overlay.className = 'melting-overlay';
-                span.appendChild(overlay);
-                
-                const dripContainer = document.createElement('div');
-                dripContainer.className = 'drip-container';
-                
-                container.appendChild(span);
-                container.appendChild(dripContainer);
-                text.appendChild(container);
-            });
-        }
+        // Initialize Three.js scene
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
 
-        function createDrip(letter, dripContainer) {
-            const drip = document.createElement('div');
-            drip.className = 'drip';
-            const letterRect = letter.getBoundingClientRect();
-            const fallHeight = window.innerHeight - letterRect.bottom;
-            drip.style.setProperty('--fall-height', `${fallHeight}px`);
+            // Setup lighting
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
             
-            const offsetX = (Math.random() - 0.5) * 5;
-            drip.style.left = `${letter.offsetWidth / 2 + offsetX}px`;
-            drip.style.top = `${letter.offsetHeight}px`;
-            dripContainer.appendChild(drip);
+            const directionalLight = new THREE.DirectionalLight(0x00ffff, 1);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
 
-            // Create puddle when drip hits bottom
-            setTimeout(() => {
-                createPuddle(letterRect.left + letter.offsetWidth / 2 + offsetX);
-                drip.remove();
-            }, 1900);
-        }
+            // Setup raycaster for mouse interaction
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
 
-        function createPuddle(x) {
-            const puddle = document.createElement('div');
-            puddle.className = 'puddle';
-            puddle.style.left = `${x}px`;
-            let size = 20 + Math.random() * 10;
-            puddle.style.width = `${size}px`;
-            puddle.style.height = `${size/2}px`;
-            document.body.appendChild(puddle);
-            puddles.push({
-                element: puddle,
-                x: x,
-                size: size
+            // Create text geometry
+            const loader = new THREE.FontLoader();
+            loader.load('https://threejs.org/examples/fonts/helvetiker_bold.typeface.json', function(font) {
+                const textGeometry = new THREE.TextGeometry(TEXT, {
+                    font: font,
+                    size: 0.5,
+                    height: 0.2,
+                    curveSegments: 12,
+                    bevelEnabled: true,
+                    bevelThickness: 0.03,
+                    bevelSize: 0.02,
+                    bevelOffset: 0,
+                    bevelSegments: 5
+                });
+
+                textGeometry.center();
+
+                const textMaterial = new THREE.MeshPhongMaterial({
+                    color: 0x00ffff,
+                    emissive: 0x006666,
+                    shininess: 100,
+                    transparent: true,
+                    opacity: 1
+                });
+
+                textMesh = new THREE.Mesh(textGeometry, textMaterial);
+                scene.add(textMesh);
+
+                // Create liquid pool
+                const poolGeometry = new THREE.PlaneGeometry(5, 0.1);
+                const poolMaterial = new THREE.MeshPhongMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.8,
+                    shininess: 100
+                });
+                poolMesh = new THREE.Mesh(poolGeometry, poolMaterial);
+                poolMesh.position.y = -2;
+                poolMesh.rotation.x = -Math.PI / 2;
+                scene.add(poolMesh);
+
+                isInitialized = true;
             });
-            
-            mergePuddles();
+
+            camera.position.z = 5;
+
+            // Add event listeners
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('resize', onWindowResize);
         }
 
-        function mergePuddles() {
-            for (let i = 0; i < puddles.length; i++) {
-                for (let j = i + 1; j < puddles.length; j++) {
-                    const p1 = puddles[i];
-                    const p2 = puddles[j];
-                    const distance = Math.abs(p1.x - p2.x);
-                    
-                    if (distance < (p1.size + p2.size) / 2) {
-                        // Merge puddles
-                        const newX = (p1.x + p2.x) / 2;
-                        const newSize = Math.sqrt(p1.size * p1.size + p2.size * p2.size);
-                        
-                        p1.element.classList.add('merging');
-                        p2.element.classList.add('merging');
-                        
-                        p1.element.style.left = `${newX}px`;
-                        p1.element.style.width = `${newSize}px`;
-                        p1.element.style.height = `${newSize/2}px`;
-                        
-                        p1.x = newX;
-                        p1.size = newSize;
-                        
-                        setTimeout(() => {
-                            p2.element.remove();
-                            puddles.splice(j, 1);
-                        }, 500);
-                    }
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function createLiquidParticle(position) {
+            const geometry = new THREE.SphereGeometry(0.05, 32, 32);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x00ffff,
+                transparent: true,
+                opacity: 0.8,
+                shininess: 100
+            });
+            const particle = new THREE.Mesh(geometry, material);
+            particle.position.copy(position);
+            particle.velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.02,
+                -0.05,
+                (Math.random() - 0.5) * 0.02
+            );
+            scene.add(particle);
+            liquidParticles.push(particle);
+        }
+
+        function updateParticles() {
+            for (let i = liquidParticles.length - 1; i >= 0; i--) {
+                const particle = liquidParticles[i];
+                particle.position.add(particle.velocity);
+                particle.velocity.y -= 0.001; // Gravity
+
+                // Remove particles that hit the pool
+                if (particle.position.y < -1.9) {
+                    scene.remove(particle);
+                    liquidParticles.splice(i, 1);
+                    poolMesh.scale.x += 0.001;
+                    poolMesh.scale.z += 0.001;
                 }
             }
         }
 
-        function reset() {
-            if (allLettersMelted) {
-                const letters = document.querySelectorAll('.letter');
-                letters.forEach(letter => {
-                    letter.classList.remove('melting');
-                });
-                
-                const drips = document.querySelectorAll('.drip');
-                drips.forEach(drip => drip.remove());
-                
-                puddles.forEach(puddle => puddle.element.remove());
-                puddles = [];
-                
-                meltedLettersCount = 0;
-                allLettersMelted = false;
-            }
-        }
+        function melt() {
+            if (!isInitialized) return;
 
-        initializeText();
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(textMesh);
 
-        document.querySelectorAll('.letter').forEach((letter) => {
-            if (letter.textContent !== ' ') {
-                letter.addEventListener('mouseover', () => {
-                    if (!letter.classList.contains('melting')) {
-                        letter.classList.add('melting');
-                        meltedLettersCount++;
-                        
-                        const dripContainer = letter.parentElement.querySelector('.drip-container');
-                        const dripsCount = 3;
-                        for (let i = 0; i < dripsCount; i++) {
-                            setTimeout(() => {
-                                createDrip(letter, dripContainer);
-                            }, i * 200);
-                        }
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                for (let i = 0; i < 3; i++) {
+                    createLiquidParticle(point);
+                }
 
-                        if (meltedLettersCount === totalLetters) {
-                            allLettersMelted = true;
-                        }
+                // Deform text mesh at intersection point
+                const vertices = textMesh.geometry.vertices;
+                const distance = 0.1;
+                vertices.forEach(vertex => {
+                    const dist = vertex.distanceTo(point);
+                    if (dist < distance) {
+                        vertex.y -= 0.01;
+                        textMesh.geometry.verticesNeedUpdate = true;
                     }
                 });
             }
-        });
+        }
 
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('puddle')) {
-                reset();
+        function animate() {
+            requestAnimationFrame(animate);
+            if (isInitialized) {
+                melt();
+                updateParticles();
+                textMesh.rotation.y += 0.001;
             }
-        });
+            renderer.render(scene, camera);
+        }
+
+        init();
+        animate();
     </script>
 </body>
 </html> 
