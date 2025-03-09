@@ -3,24 +3,84 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scott's App</title>
+    <title>Enhanced Melting Text</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://threejs.org/examples/js/loaders/FontLoader.js"></script>
     <script src="https://threejs.org/examples/js/geometries/TextGeometry.js"></script>
     <style>
+        :root {
+            --text-color: #2a4d69;
+            --drip-color: #4b86b4;
+            --puddle-color: #63ace5;
+            --background: #0a0a2a;
+        }
+
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #0a0a2a;
+            background-color: var(--background);
+            font-family: Arial, sans-serif;
+        }
+
+        .puddle-container {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .puddle {
+            background: var(--puddle-color);
+            height: 0;
+            width: 0;
+            border-radius: 50% 50% 0 0;
+            opacity: 0.8;
+            transition: all 0.8s ease-out;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        .puddle.active {
+            height: 40px;
+            width: 300px;
+        }
+
+        #resetButton {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background: var(--text-color);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 2;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        #resetButton.visible {
+            opacity: 1;
         }
     </style>
 </head>
 <body>
+    <div class="puddle-container">
+        <div class="puddle" id="textPuddle"></div>
+    </div>
+    <button id="resetButton">Reset Text</button>
     <script>
         let scene, camera, renderer, textMesh, raycaster, mouse;
-        const TEXT = "scotts app";
+        let originalVertices = null;
         let drips = [];
-
+        let puddleSize = 0;
+        const TEXT = "scotts app";
+        
         class Drip {
             constructor(startPosition, color) {
                 const geometry = new THREE.SphereGeometry(0.02, 8, 8);
@@ -35,16 +95,18 @@
                 this.mesh = new THREE.Mesh(geometry, material);
                 this.mesh.position.copy(startPosition);
                 this.velocity = new THREE.Vector3(0, 0, 0);
-                this.acceleration = new THREE.Vector3(0, -0.01, 0); // Gravity
+                this.acceleration = new THREE.Vector3(0, -0.01, 0);
                 this.trail = [];
                 this.createTrail();
+                this.lifetime = 0;
+                this.maxLifetime = 200;
                 
                 scene.add(this.mesh);
             }
 
             createTrail() {
                 const trailGeometry = new THREE.BufferGeometry();
-                const positions = new Float32Array(30 * 3); // 10 points, 3 coordinates each
+                const positions = new Float32Array(30 * 3);
                 trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
                 
                 const trailMaterial = new THREE.LineBasicMaterial({
@@ -58,11 +120,19 @@
             }
 
             update() {
-                // Update velocity and position with acceleration
+                this.lifetime++;
+                
+                // Update velocity with air resistance
                 this.velocity.add(this.acceleration);
+                this.velocity.multiplyScalar(0.99); // Air resistance
+                
+                // Add random forces for more realistic movement
+                this.velocity.x += (Math.random() - 0.5) * 0.001;
+                this.velocity.z += (Math.random() - 0.5) * 0.001;
+                
                 this.mesh.position.add(this.velocity);
 
-                // Update trail
+                // Update trail with interpolation
                 this.trail.unshift(this.mesh.position.clone());
                 if (this.trail.length > 10) {
                     this.trail.pop();
@@ -75,13 +145,20 @@
                     positions[i * 3 + 1] = point.y;
                     positions[i * 3 + 2] = point.z;
                 }
+                
+                // Fade out trail towards the end
+                const opacity = Math.max(0, 1 - this.lifetime / this.maxLifetime);
+                this.trailLine.material.opacity = opacity * 0.5;
+                this.mesh.material.opacity = opacity * 0.9;
+                
                 this.trailLine.geometry.attributes.position.needsUpdate = true;
 
-                // Add random wobble
-                this.mesh.position.x += (Math.random() - 0.5) * 0.002;
-                this.mesh.position.z += (Math.random() - 0.5) * 0.002;
+                // Update puddle size when drip hits bottom
+                if (this.mesh.position.y < -2) {
+                    updatePuddle(0.1);
+                }
 
-                return this.mesh.position.y > -3; // Return false when drip should be removed
+                return this.lifetime < this.maxLifetime && this.mesh.position.y > -3;
             }
 
             remove() {
@@ -101,11 +178,10 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // Initialize raycaster and mouse
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
 
-            // Add lights
+            // Enhanced lighting setup
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
 
@@ -113,7 +189,20 @@
             directionalLight.position.set(1, 1, 1);
             scene.add(directionalLight);
 
-            // Load font and create text
+            // Add point light for better highlights
+            const pointLight = new THREE.PointLight(0x00ffff, 0.5);
+            pointLight.position.set(0, 0, 2);
+            scene.add(pointLight);
+
+            loadText();
+
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('mousemove', onMouseMove, false);
+            document.getElementById('textPuddle').addEventListener('click', resetText);
+            document.getElementById('resetButton').addEventListener('click', resetText);
+        }
+
+        function loadText() {
             const loader = new THREE.FontLoader();
             loader.load('https://threejs.org/examples/fonts/helvetiker_bold.typeface.json', function(font) {
                 const textGeometry = new THREE.TextGeometry(TEXT, {
@@ -139,11 +228,10 @@
 
                 textMesh = new THREE.Mesh(textGeometry, textMaterial);
                 scene.add(textMesh);
-            });
 
-            // Add event listeners
-            window.addEventListener('resize', onWindowResize, false);
-            window.addEventListener('mousemove', onMouseMove, false);
+                // Store original vertices for reset
+                originalVertices = Array.from(textGeometry.attributes.position.array);
+            });
         }
 
         function onMouseMove(event) {
@@ -157,6 +245,42 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        function updatePuddle(amount) {
+            puddleSize += amount;
+            const puddle = document.getElementById('textPuddle');
+            puddle.classList.add('active');
+            puddle.style.width = Math.min(300, puddleSize * 1000) + 'px';
+            
+            // Show reset button when puddle starts forming
+            if (puddleSize > 0) {
+                document.getElementById('resetButton').classList.add('visible');
+            }
+        }
+
+        function resetText() {
+            if (!textMesh || !originalVertices) return;
+
+            // Reset text geometry
+            const position = textMesh.geometry.attributes.position;
+            for (let i = 0; i < position.array.length; i++) {
+                position.array[i] = originalVertices[i];
+            }
+            position.needsUpdate = true;
+
+            // Clear all drips
+            drips.forEach(drip => drip.remove());
+            drips = [];
+
+            // Reset puddle
+            puddleSize = 0;
+            const puddle = document.getElementById('textPuddle');
+            puddle.style.width = '0';
+            puddle.classList.remove('active');
+            
+            // Hide reset button
+            document.getElementById('resetButton').classList.remove('visible');
+        }
+
         function melt() {
             if (!textMesh) return;
 
@@ -166,14 +290,14 @@
             if (intersects.length > 0) {
                 const point = intersects[0].point;
                 
-                // Create drips at intersection point
-                if (Math.random() < 0.3) { // Control drip creation rate
+                // Create drips with varying sizes
+                if (Math.random() < 0.3) {
                     drips.push(new Drip(point, 0x00ffff));
                 }
 
-                // Deform the text mesh
+                // Enhanced melting effect
                 const position = textMesh.geometry.attributes.position;
-                const heatRadius = 0.1;
+                const heatRadius = 0.15;
                 
                 for (let i = 0; i < position.count; i++) {
                     const vertex = new THREE.Vector3();
@@ -182,8 +306,11 @@
                     
                     const dist = vertex.distanceTo(point);
                     if (dist < heatRadius) {
-                        const heat = 1 - (dist / heatRadius);
+                        const heat = Math.pow(1 - dist / heatRadius, 2); // Quadratic falloff
                         vertex.y -= 0.005 * heat;
+                        
+                        // Add horizontal spread
+                        vertex.x += (Math.random() - 0.5) * 0.001 * heat;
                         
                         // Update vertex position
                         vertex.applyMatrix4(textMesh.matrixWorld.invert());
