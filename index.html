@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scott's App</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            overflow: hidden;
+        }
+
+        .text-container {
+            position: relative;
+        }
+
+        .letter {
+            display: inline-block;
+            font-size: 3rem;
+            color: #333;
+            transition: all 0.3s ease;
+            position: relative;
+            cursor: default;
+        }
+
+        .drip {
+            position: absolute;
+            background-color: #333;
+            pointer-events: none;
+            border-radius: 2px;
+            animation: dripping 1.5s forwards;
+            transform-origin: top center;
+        }
+
+        .puddle {
+            position: fixed;
+            bottom: 0;
+            height: 0;
+            background-color: #333;
+            border-radius: 50% 50% 0 0;
+            animation: pooling 1s forwards;
+            transform-origin: bottom center;
+        }
+
+        @keyframes dripping {
+            0% {
+                height: 0;
+                width: 3px;
+                opacity: 1;
+                transform: scaleY(0);
+            }
+            20% {
+                width: 6px;
+                transform: scaleY(1);
+            }
+            100% {
+                height: 100vh;
+                width: 3px;
+                opacity: 0.7;
+                transform: scaleY(1);
+            }
+        }
+
+        @keyframes pooling {
+            0% {
+                width: 0;
+                height: 0;
+                opacity: 0;
+            }
+            100% {
+                width: 40px;
+                height: 10px;
+                opacity: 0.7;
+            }
+        }
+
+        .letter.melting {
+            transform: scale(0.8) translateY(10px);
+            opacity: 0;
+            filter: blur(3px);
+            transition: all 0.8s ease;
+        }
+
+        .bottom-pool {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 0;
+            background-color: #333;
+            transition: height 2s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="text-container" id="text">scotts app</div>
+    <div class="bottom-pool" id="pool"></div>
+
+    <script>
+        const text = document.getElementById('text');
+        const pool = document.getElementById('pool');
+        const content = text.textContent;
+        text.textContent = '';
+        let poolHeight = 0;
+
+        [...content].forEach(char => {
+            const span = document.createElement('span');
+            span.textContent = char;
+            span.className = 'letter';
+            text.appendChild(span);
+        });
+
+        document.querySelectorAll('.letter').forEach(letter => {
+            letter.addEventListener('mouseover', () => {
+                if (!letter.classList.contains('melting')) {
+                    letter.classList.add('melting');
+                    
+                    // Create multiple drips for a more liquid effect
+                    const dripsCount = 3;
+                    for (let i = 0; i < dripsCount; i++) {
+                        setTimeout(() => {
+                            createDrip(letter, i);
+                        }, i * 100);
+                    }
+
+                    // Create puddle at the bottom
+                    setTimeout(() => {
+                        createPuddle(letter);
+                    }, 800);
+
+                    // Increase pool height
+                    poolHeight += 2;
+                    pool.style.height = `${poolHeight}px`;
+                }
+            });
+        });
+
+        function createDrip(letter, offset) {
+            const drip = document.createElement('div');
+            drip.className = 'drip';
+            const offsetX = (Math.random() - 0.5) * 10;
+            drip.style.left = `${letter.offsetLeft + letter.offsetWidth / 2 + offsetX}px`;
+            drip.style.top = `${letter.offsetTop + letter.offsetHeight}px`;
+            document.body.appendChild(drip);
+
+            setTimeout(() => {
+                drip.remove();
+            }, 1500);
+        }
+
+        function createPuddle(letter) {
+            const puddle = document.createElement('div');
+            puddle.className = 'puddle';
+            puddle.style.left = `${letter.offsetLeft + letter.offsetWidth / 2 - 20}px`;
+            document.body.appendChild(puddle);
+
+            setTimeout(() => {
+                puddle.style.opacity = '0';
+                setTimeout(() => puddle.remove(), 1000);
+            }, 1500);
+        }
+    </script>
+</body>
+</html> 
