@@ -6,6 +6,15 @@
     <title>Scott's App</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://threejs.org/examples/js/objects/MarchingCubes.js"></script>
+    <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://threejs.org/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://threejs.org/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://threejs.org/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://threejs.org/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://threejs.org/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://threejs.org/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
     <style>
         body {
             margin: 0;
@@ -19,39 +28,294 @@
             width: 100%;
             height: 100%;
         }
-        #text-overlay {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-family: 'Orbitron', sans-serif;
-            font-size: 4rem;
-            color: #00ffff;
-            text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 0.5s ease;
-        }
     </style>
 </head>
 <body>
-    <div id="text-overlay">scotts app</div>
-    <script>
-        let scene, camera, renderer, raycaster, mouse;
-        let textMesh, liquidParticles = [], poolMesh;
-        let isInitialized = false;
-        const TEXT = "scotts app";
+    <script id="liquidVertexShader" type="x-shader/x-vertex">
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying vec2 vUv;
+        uniform float time;
 
-        // Initialize Three.js scene
+        void main() {
+            vNormal = normal;
+            vPosition = position;
+            vUv = uv;
+            
+            // Add wave motion to liquid
+            vec3 pos = position;
+            float wave = sin(pos.x * 5.0 + time) * cos(pos.z * 5.0 + time) * 0.05;
+            pos.y += wave;
+            
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+    </script>
+
+    <script id="liquidFragmentShader" type="x-shader/x-fragment">
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying vec2 vUv;
+        uniform float time;
+        uniform vec3 color;
+        uniform float temperature;
+
+        void main() {
+            // Fresnel effect for realistic liquid
+            vec3 viewDirection = normalize(cameraPosition - vPosition);
+            float fresnelTerm = pow(1.0 - abs(dot(viewDirection, vNormal)), 3.0);
+            
+            // Heat color
+            vec3 hotColor = vec3(0.0, 1.0, 1.0);
+            vec3 coolColor = vec3(0.0, 0.4, 0.8);
+            vec3 finalColor = mix(coolColor, hotColor, temperature);
+            
+            // Surface caustics
+            float caustics = pow(sin(vUv.x * 20.0 + time) * sin(vUv.y * 20.0 + time), 2.0);
+            
+            // Combine effects
+            vec3 result = mix(finalColor, vec3(1.0), fresnelTerm * 0.5 + caustics * 0.2);
+            gl_FragColor = vec4(result, 0.9);
+        }
+    </script>
+
+    <script>
+        let scene, camera, renderer, composer, controls;
+        let textMesh, liquidSystem, metaballSystem;
+        let time = 0;
+        const particles = [];
+        const gridSize = 32;
+        const resolution = 50;
+
+        class LiquidParticle {
+            constructor(position) {
+                this.position = position.clone();
+                this.velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.02,
+                    -0.05,
+                    (Math.random() - 0.5) * 0.02
+                );
+                this.force = new THREE.Vector3();
+                this.temperature = 1.0;
+                this.mass = 1.0;
+            }
+
+            update(dt) {
+                this.velocity.add(this.force.multiplyScalar(dt / this.mass));
+                this.position.add(this.velocity.clone().multiplyScalar(dt));
+                this.force.set(0, -9.81, 0); // Reset force with gravity
+                this.temperature *= 0.99; // Cool down
+            }
+        }
+
+        class MetaballSystem {
+            constructor() {
+                this.resolution = resolution;
+                this.isolation = 80;
+                
+                const material = new THREE.ShaderMaterial({
+                    uniforms: {
+                        time: { value: 0 },
+                        color: { value: new THREE.Color(0x00ffff) },
+                        temperature: { value: 1.0 }
+                    },
+                    vertexShader: document.getElementById('liquidVertexShader').textContent,
+                    fragmentShader: document.getElementById('liquidFragmentShader').textContent,
+                    transparent: true
+                });
+
+                this.system = new THREE.MarchingCubes(
+                    this.resolution,
+                    material,
+                    true,
+                    true
+                );
+                
+                this.system.position.set(0, 0, 0);
+                this.system.scale.set(2, 2, 2);
+                
+                scene.add(this.system);
+            }
+
+            update(particles, time) {
+                this.system.reset();
+                particles.forEach(particle => {
+                    const { position, temperature } = particle;
+                    this.system.addBall(
+                        position.x,
+                        position.y,
+                        position.z,
+                        temperature * 0.5, // strength
+                        0.1 // subtract
+                    );
+                });
+                
+                this.system.material.uniforms.time.value = time;
+                this.system.material.uniforms.temperature.value = 
+                    particles.reduce((sum, p) => sum + p.temperature, 0) / particles.length;
+            }
+        }
+
+        class FluidSystem {
+            constructor() {
+                this.particles = [];
+                this.grid = new Array(gridSize * gridSize * gridSize).fill(null).map(() => []);
+                this.cellSize = 0.1;
+                this.smoothingRadius = 0.2;
+                this.targetDensity = 1000;
+                this.pressureConstant = 200;
+                this.viscosity = 0.1;
+                this.surfaceTension = 0.072;
+            }
+
+            addParticle(particle) {
+                this.particles.push(particle);
+            }
+
+            getGridCell(position) {
+                const x = Math.floor((position.x + 1) / this.cellSize);
+                const y = Math.floor((position.y + 1) / this.cellSize);
+                const z = Math.floor((position.z + 1) / this.cellSize);
+                return x + y * gridSize + z * gridSize * gridSize;
+            }
+
+            updateGrid() {
+                this.grid.forEach(cell => cell.length = 0);
+                this.particles.forEach(particle => {
+                    const cell = this.getGridCell(particle.position);
+                    if (cell >= 0 && cell < this.grid.length) {
+                        this.grid[cell].push(particle);
+                    }
+                });
+            }
+
+            calculateDensity(particle) {
+                let density = 0;
+                const cell = this.getGridCell(particle.position);
+                
+                for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                    for (let offsetY = -1; offsetY <= 1; offsetY++) {
+                        for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                            const neighborCell = cell + 
+                                offsetX + 
+                                offsetY * gridSize + 
+                                offsetZ * gridSize * gridSize;
+                            
+                            if (neighborCell >= 0 && neighborCell < this.grid.length) {
+                                this.grid[neighborCell].forEach(neighbor => {
+                                    const dist = particle.position.distanceTo(neighbor.position);
+                                    if (dist < this.smoothingRadius) {
+                                        density += this.smoothingKernel(dist);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                return density;
+            }
+
+            smoothingKernel(distance) {
+                if (distance >= this.smoothingRadius) return 0;
+                const x = 1 - distance / this.smoothingRadius;
+                return 315 / (64 * Math.PI * Math.pow(this.smoothingRadius, 9)) * Math.pow(x, 3);
+            }
+
+            calculatePressure(density) {
+                return this.pressureConstant * (density - this.targetDensity);
+            }
+
+            update(dt) {
+                this.updateGrid();
+                
+                // Calculate densities and pressures
+                this.particles.forEach(particle => {
+                    particle.density = this.calculateDensity(particle);
+                    particle.pressure = this.calculatePressure(particle.density);
+                });
+                
+                // Calculate forces
+                this.particles.forEach(particle => {
+                    let pressureForce = new THREE.Vector3();
+                    let viscosityForce = new THREE.Vector3();
+                    let surfaceTensionForce = new THREE.Vector3();
+                    
+                    const cell = this.getGridCell(particle.position);
+                    
+                    // Gather forces from neighbors
+                    this.grid[cell].forEach(neighbor => {
+                        if (neighbor !== particle) {
+                            const dist = particle.position.distanceTo(neighbor.position);
+                            if (dist < this.smoothingRadius) {
+                                // Pressure force
+                                const direction = particle.position.clone()
+                                    .sub(neighbor.position).normalize();
+                                pressureForce.add(direction.multiplyScalar(
+                                    (particle.pressure + neighbor.pressure) / (2 * neighbor.density)
+                                ));
+                                
+                                // Viscosity force
+                                viscosityForce.add(
+                                    neighbor.velocity.clone()
+                                        .sub(particle.velocity)
+                                        .multiplyScalar(this.viscosity / neighbor.density)
+                                );
+                                
+                                // Surface tension
+                                const tensionForce = this.surfaceTension * 
+                                    (this.smoothingRadius - dist) / dist;
+                                surfaceTensionForce.add(
+                                    direction.multiplyScalar(tensionForce)
+                                );
+                            }
+                        }
+                    });
+                    
+                    // Apply forces
+                    particle.force.add(pressureForce);
+                    particle.force.add(viscosityForce);
+                    particle.force.add(surfaceTensionForce);
+                });
+                
+                // Update particles
+                this.particles.forEach(particle => particle.update(dt));
+            }
+        }
+
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                alpha: true,
+                logarithmicDepthBuffer: true
+            });
+            
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1;
             document.body.appendChild(renderer.domElement);
 
-            // Setup lighting
+            // Post-processing
+            composer = new THREE.EffectComposer(renderer);
+            const renderPass = new THREE.RenderPass(scene, camera);
+            composer.addPass(renderPass);
+
+            const bloomPass = new THREE.UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                1.5, // strength
+                0.4, // radius
+                0.85 // threshold
+            );
+            composer.addPass(bloomPass);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Lighting
             const ambientLight = new THREE.AmbientLight(0x404040);
             scene.add(ambientLight);
             
@@ -59,11 +323,11 @@
             directionalLight.position.set(1, 1, 1);
             scene.add(directionalLight);
 
-            // Setup raycaster for mouse interaction
-            raycaster = new THREE.Raycaster();
-            mouse = new THREE.Vector2();
+            // Initialize systems
+            liquidSystem = new FluidSystem();
+            metaballSystem = new MetaballSystem();
 
-            // Create text geometry
+            // Create initial text
             const loader = new THREE.FontLoader();
             loader.load('https://threejs.org/examples/fonts/helvetiker_bold.typeface.json', function(font) {
                 const textGeometry = new THREE.TextGeometry(TEXT, {
@@ -90,26 +354,11 @@
 
                 textMesh = new THREE.Mesh(textGeometry, textMaterial);
                 scene.add(textMesh);
-
-                // Create liquid pool
-                const poolGeometry = new THREE.PlaneGeometry(5, 0.1);
-                const poolMaterial = new THREE.MeshPhongMaterial({
-                    color: 0x00ffff,
-                    transparent: true,
-                    opacity: 0.8,
-                    shininess: 100
-                });
-                poolMesh = new THREE.Mesh(poolGeometry, poolMaterial);
-                poolMesh.position.y = -2;
-                poolMesh.rotation.x = -Math.PI / 2;
-                scene.add(poolMesh);
-
-                isInitialized = true;
             });
 
             camera.position.z = 5;
 
-            // Add event listeners
+            // Event listeners
             window.addEventListener('mousemove', onMouseMove);
             window.addEventListener('resize', onWindowResize);
         }
@@ -123,62 +372,34 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function createLiquidParticle(position) {
-            const geometry = new THREE.SphereGeometry(0.05, 32, 32);
-            const material = new THREE.MeshPhongMaterial({
-                color: 0x00ffff,
-                transparent: true,
-                opacity: 0.8,
-                shininess: 100
-            });
-            const particle = new THREE.Mesh(geometry, material);
-            particle.position.copy(position);
-            particle.velocity = new THREE.Vector3(
-                (Math.random() - 0.5) * 0.02,
-                -0.05,
-                (Math.random() - 0.5) * 0.02
-            );
-            scene.add(particle);
-            liquidParticles.push(particle);
-        }
-
-        function updateParticles() {
-            for (let i = liquidParticles.length - 1; i >= 0; i--) {
-                const particle = liquidParticles[i];
-                particle.position.add(particle.velocity);
-                particle.velocity.y -= 0.001; // Gravity
-
-                // Remove particles that hit the pool
-                if (particle.position.y < -1.9) {
-                    scene.remove(particle);
-                    liquidParticles.splice(i, 1);
-                    poolMesh.scale.x += 0.001;
-                    poolMesh.scale.z += 0.001;
-                }
-            }
+            composer.setSize(window.innerWidth, window.innerHeight);
         }
 
         function melt() {
-            if (!isInitialized) return;
+            if (!textMesh) return;
 
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObject(textMesh);
 
             if (intersects.length > 0) {
                 const point = intersects[0].point;
-                for (let i = 0; i < 3; i++) {
-                    createLiquidParticle(point);
+                // Create particles at intersection
+                for (let i = 0; i < 5; i++) {
+                    const particle = new LiquidParticle(point);
+                    particle.temperature = 1.0;
+                    liquidSystem.addParticle(particle);
                 }
 
-                // Deform text mesh at intersection point
+                // Heat and deform nearby vertices
                 const vertices = textMesh.geometry.vertices;
-                const distance = 0.1;
+                const heatRadius = 0.2;
                 vertices.forEach(vertex => {
                     const dist = vertex.distanceTo(point);
-                    if (dist < distance) {
-                        vertex.y -= 0.01;
+                    if (dist < heatRadius) {
+                        const heat = 1 - (dist / heatRadius);
+                        vertex.y -= 0.01 * heat;
+                        vertex.x += (Math.random() - 0.5) * 0.005 * heat;
+                        vertex.z += (Math.random() - 0.5) * 0.005 * heat;
                         textMesh.geometry.verticesNeedUpdate = true;
                     }
                 });
@@ -187,12 +408,17 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            if (isInitialized) {
-                melt();
-                updateParticles();
-                textMesh.rotation.y += 0.001;
+            
+            time += 0.016;
+            
+            if (liquidSystem && metaballSystem) {
+                liquidSystem.update(0.016);
+                metaballSystem.update(liquidSystem.particles, time);
             }
-            renderer.render(scene, camera);
+
+            melt();
+            controls.update();
+            composer.render();
         }
 
         init();
